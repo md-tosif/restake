@@ -60,9 +60,7 @@ class Network {
   async load() {
     const chainData = await this.directory.getChainData(this.data.name);
     this.setChain({...this.data, ...chainData})
-    this.validators = (await this.directory.getValidators(this.name)).map(data => {
-      return Validator(this, data)
-    })
+    this.validators = []
     this.operators = this.data.operators || (this.validators.filter(el => el.restake && this.allowOperator(el.operator_address))).map(data => {
       return Operator(this, data)
     })
