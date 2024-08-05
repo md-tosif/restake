@@ -11,7 +11,7 @@
   },
   {
     "name": "juno",
-    "gasPrice": "0.0025ujuno",
+    "gasPrice": "0.0750ujuno",
     "ownerAddress": "junovaloper19ur8r2l25qhsy9xvej5zgpuc5cpn6syydmwtrt",
     "autostake": {
       "batchTxs": 25
@@ -29,8 +29,8 @@
   {
     "name": "chihuahua",
     "ownerAddress": "chihuahuavaloper19vwcee000fhazmpt4ultvnnkhfh23ppwxll8zz",
-    "gasPrice": "1uhuahua",
-    "gasPricePrefer": "1uhuahua"
+    "gasPrice": "500uhuahua",
+    "gasPricePrefer": "500uhuahua"
   },
   {
     "name": "gravitybridge",
@@ -228,7 +228,12 @@
   },
   {
     "name": "echelon",
-    "keplrFeatures": ["ibc-transfer", "ibc-go", "eth-address-gen", "eth-key-sign"]
+    "keplrFeatures": [
+      "ibc-transfer",
+      "ibc-go",
+      "eth-address-gen",
+      "eth-key-sign"
+    ]
   },
   {
     "name": "kichaintestnet",
@@ -236,7 +241,7 @@
   },
   {
     "name": "likecoin",
-    "gasPrice": "10nanolike"
+    "gasPrice": "10000nanolike"
   },
   {
     "name": "passage",
@@ -320,6 +325,29 @@
   },
   {
     "name": "coreumtestnet",
-    "testnet": true
+    "testnet": true,
+    "gasPrice": "0.0625ucore"
+  },
+  {
+    "name": "shido",
+    "ownerAddress": "corevaloper1py9v5f7e4aaka55lwtthk30scxhnqfa6agwxt8",
+    "gasPrice": "0.250000000000000000shido"
+  },
+  {
+    "name": "shidotestnet",
+    "testnet": true,
+    "gasPrice": "0.250000000000000000shido"
+  },
+  {
+    "name": "source",
+    "gasPrice": "0.05usource"
+  },
+  {
+    "name": "nolus",
+    "gasPrice": "0.0025unls"
+  },
+  {
+    "name": "realio",
+    "gasPrice": "1000000000ario"
   }
 ]

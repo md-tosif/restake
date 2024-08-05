@@ -1,10 +1,10 @@
 import _ from 'lodash'
 import { format, floor, bignumber } from 'mathjs'
 import { coin as _coin } from  '@cosmjs/stargate'
+import axios from 'axios'
+import winston from 'winston'
 
-export function timeStamp(...args) {
-  console.log('[' + new Date().toISOString().substring(11, 23) + ']', ...args);
-}
+import { RESTAKE_USER_AGENT } from './constants.mjs'
 
 export function coin(amount, denom){
   return _coin(format(floor(amount), {notation: 'fixed'}), denom)
@@ -62,21 +62,6 @@ export function buildExecableMessage(type, typeUrl, value, shouldExec){
 }
 
 export function parseGrants(grants, grantee, granter) {
-  // claimGrant is removed but we track for now to allow revoke
-  const claimGrant = grants.find((el) => {
-    if (
-      (!el.grantee || el.grantee === grantee) &&
-      (!el.granter || el.granter === granter) &&
-      (el.authorization["@type"] ===
-      "/cosmos.authz.v1beta1.GenericAuthorization" &&
-      el.authorization.msg ===
-      "/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward")
-    ) {
-      return Date.parse(el.expiration) > new Date();
-    } else {
-      return false;
-    }
-  });
   const stakeGrant = grants.find((el) => {
     if (
       (!el.grantee || el.grantee === grantee) &&
@@ -90,14 +75,22 @@ export function parseGrants(grants, grantee, granter) {
         "/cosmos.staking.v1beta1.MsgDelegate"
       ))
     ) {
-      return Date.parse(el.expiration) > new Date();
+      if (el.expiration === null) {
+        // null expiration is flakey currently
+        // sometimes it means it's expired, sometimes no expiration set (infinite grant)
+        // we have to treat as invalid until this is resolved
+        return false;
+      } else if (Date.parse(el.expiration) > new Date()) {
+        return true;
+      } else {
+        return false;
+      }
     } else {
       return false;
     }
   })
   return {
-    claimGrant,
-    stakeGrant,
+    stakeGrant
   };
 }
 
@@ -135,4 +128,56 @@ export async function executeSync(calls, count) {
   for (const batchCall of batchCalls) {
     await mapAsync(batchCall, call => call())
   }
+}
+
+export async function get(url, opts) {
+  const headers = opts?.headers ?? {}
+
+  return axios.get(url, {
+    ...opts,
+    headers: {
+      ...headers,
+      'User-Agent': RESTAKE_USER_AGENT,
+    }
+  })
+}
+
+export async function post(url, body, opts) {
+  const headers = opts?.headers ?? {}
+
+  return axios.post(url, body, {
+    ...opts,
+    headers: {
+      ...headers,
+      'User-Agent': RESTAKE_USER_AGENT,
+    }
+  })
+}
+
+export function createLogger(module) {
+  return winston.createLogger({
+    level: 'debug',
+    defaultMeta: { module },
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.prettyPrint(),
+      winston.format.timestamp(),
+      winston.format.splat(),
+      winston.format.printf(({
+        timestamp,
+        level,
+        message,
+        label = '',
+        ...meta
+      }) => {
+        const metaFormatted = Object.entries(meta)
+          .map(([key, value]) => `${key}=${value}`)
+          .join(' ')
+        return `[${timestamp}] ${level}: ${message} ${metaFormatted}`
+      })
+    ),
+    transports: [
+      new winston.transports.Console()
+    ],
+  });
 }

@@ -12,15 +12,17 @@ import Network from '../utils/Network.mjs'
 import Wallet from '../utils/Wallet.mjs';
 import NetworkRunner from './NetworkRunner.mjs';
 import Health from './Health.mjs';
-import { timeStamp, executeSync, overrideNetworks } from '../utils/Helpers.mjs'
+import { executeSync, overrideNetworks, createLogger } from '../utils/Helpers.mjs'
 import EthSigner from '../utils/EthSigner.mjs';
 
 export default function Autostake(mnemonic, opts) {
+  const mainLogger = createLogger('autostake')
+
   opts = opts || {}
   let failed = false
 
   if (!mnemonic) {
-    timeStamp('Please provide a MNEMONIC environment variable')
+    mainLogger.error('Please provide a MNEMONIC environment variable')
     process.exit()
   }
 
@@ -40,6 +42,7 @@ export default function Autostake(mnemonic, opts) {
         const health = new Health(data.healthCheck, { dryRun: opts.dryRun, networkName: data.name })
         health.started('⚛')
         const results = await runWithRetry(data, health)
+        const network = results[0]?.networkRunner?.network
         const { success, skipped } = results[results.length - 1] || {}
         if(!skipped && !failed){
           health.log(`Autostake ${success ? 'completed' : 'failed'} after ${results.length} attempt(s)`)
@@ -49,9 +52,9 @@ export default function Autostake(mnemonic, opts) {
           })
         }
         if (success || skipped) {
-          return health.success('Autostake finished')
+          return health.success(`Autostake finished for ${network?.prettyName || data.name}`)
         } else {
-          return health.failed('Autostake failed')
+          return health.failed(`Autostake failed for ${network?.prettyName || data.name}`)
         }
       }
     })
@@ -123,23 +126,31 @@ export default function Autostake(mnemonic, opts) {
       throw new Error(`Unable to load network data for ${network.name}`)
     }
 
-    timeStamp('Loaded', network.prettyName)
+    const logger = mainLogger.child({ chain: network.name })
+
+    logger.info('Loaded chain', { prettyName: network.prettyName })
 
     const { signer, slip44 } = await getSigner(network)
     const wallet = new Wallet(network, signer)
     const botAddress = await wallet.getAddress()
 
-    timeStamp('Bot address is', botAddress)
+    logger.info('Bot address', { address: botAddress })
 
     if (network.slip44 && network.slip44 !== slip44) {
-      timeStamp("!! You are not using the preferred derivation path !!")
-      timeStamp("!! You should switch to the correct path unless you have grants. Check the README !!")
+      logger.warn("!! You are not using the preferred derivation path !!")
+      logger.warn("!! You should switch to the correct path unless you have grants. Check the README !!")
     }
 
     const operator = network.getOperatorByBotAddress(botAddress)
-    if (!operator) return timeStamp('Not an operator')
+    if (!operator) {
+      logger.info('Not an operator')
+      return
+    }
 
-    if (!network.authzSupport) return timeStamp('No Authz support')
+    if (!network.authzSupport) {
+      logger.info('No Authz support')
+      return
+    }
 
     await network.connect({ timeout: config.delegationsTimeout || 20000 })
 
@@ -147,11 +158,11 @@ export default function Autostake(mnemonic, opts) {
 
     if (!restUrl) throw new Error('Could not connect to REST API')
 
-    timeStamp('Using REST URL', restUrl)
+    logger.info('Using REST URL', { url: restUrl })
 
     if (usingDirectory) {
-      timeStamp('You are using public nodes, they may not be reliable. Check the README to use your own')
-      timeStamp('Delaying briefly and adjusting config to reduce load...')
+      logger.warn('You are using public nodes, they may not be reliable. Check the README to use your own')
+      logger.warn('Delaying briefly and adjusting config to reduce load...')
       config = {...config, batchPageSize: 50, batchQueries: 10, queryThrottle: 2500}
       await new Promise(r => setTimeout(r, (Math.random() * 31) * 1000));
     }
@@ -168,9 +179,11 @@ export default function Autostake(mnemonic, opts) {
   }
 
   async function getSigner(network) {
+    const logger = mainLogger.child({ chain: network.name })
+
     let slip44
     if (network.data.autostake?.correctSlip44 || network.slip44 === 60) {
-      if (network.slip44 === 60) timeStamp('Found ETH coin type')
+      if (network.slip44 === 60) logger.info('Found ETH coin type')
       slip44 = network.slip44 || 118
     } else {
       slip44 = network.data.autostake?.slip44 || 118
@@ -182,14 +195,14 @@ export default function Autostake(mnemonic, opts) {
       Slip10RawIndex.normal(0),
       Slip10RawIndex.normal(0),
     ];
-    slip44 != 118 && timeStamp('Using HD Path', pathToString(hdPath))
+    slip44 != 118 && logger.info('Using HD Path', { path: pathToString(hdPath) })
 
     let signer = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
       prefix: network.prefix,
       hdPaths: [hdPath]
     });
 
-    if (network.slip44 === 60) {
+    if (slip44 === 60) {
       const ethSigner = EthWallet.fromMnemonic(mnemonic);
       signer = EthSigner(signer, ethSigner, network.prefix)
     }
@@ -205,7 +218,7 @@ export default function Autostake(mnemonic, opts) {
       const overrides = overridesData && JSON.parse(overridesData) || {}
       return overrideNetworks(networks, overrides)
     } catch (error) {
-      timeStamp('Failed to parse networks.local.json, check JSON is valid', error.message)
+      mainLogger.error('Failed to parse networks.local.json, check JSON is valid', { message: error.message })
       return networks
     }
   }

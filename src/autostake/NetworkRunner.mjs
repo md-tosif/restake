@@ -3,7 +3,7 @@ import _ from 'lodash'
 import { add, subtract, bignumber, floor, smaller, smallerEq } from 'mathjs'
 
 import { MsgDelegate } from "cosmjs-types/cosmos/staking/v1beta1/tx.js";
-import { coin, timeStamp, mapSync, executeSync, parseGrants } from '../utils/Helpers.mjs'
+import { coin, mapSync, executeSync, parseGrants, createLogger } from '../utils/Helpers.mjs'
 
 export default class NetworkRunner {
   constructor(network, operator, signingClient, opts) {
@@ -25,6 +25,8 @@ export default class NetworkRunner {
     this.processed = {}
     this.errors = {}
     this.results = []
+
+    this.logger = createLogger('network_runner').child({ chain: network.name })
   }
 
   didSucceed() {
@@ -52,32 +54,22 @@ export default class NetworkRunner {
   }
 
   setError(address, error) {
-    timeStamp(address, ':', error)
+    this.logger.error(error, { address })
     this.errors[address] = error
   }
 
   async run(addresses) {
     try {
-      timeStamp("Running with options:", this.opts)
+      this.logger.info('Running with options', this.opts)
       this.balance = await this.getBalance() || 0
 
-      if (addresses) {
-        timeStamp("Checking", addresses.length, "addresses for grants...")
-      } else {
-        timeStamp('Finding delegators...')
-        addresses = await this.getDelegations().then(delegations => {
-          return delegations.map(delegation => {
-            if (delegation.balance.amount === 0) return
-
-            return delegation.delegation.delegator_address
-          })
-        })
-        timeStamp("Checking", addresses.length, "delegators for grants...")
+      let grantedAddresses = await this.getAddressesFromGrants(addresses)
+      if(grantedAddresses === false){
+        this.logger.warn('All grants query not supported, falling back to checking delegators...')
+        grantedAddresses = await this.getAddressesFromDelegators(addresses)
       }
 
-      let grantedAddresses = await this.getGrantedAddresses(addresses)
-
-      timeStamp("Found", grantedAddresses.length, "addresses with valid grants...")
+      this.logger.info('Found addresses with valid grants...', { count: grantedAddresses.length})
       if (grantedAddresses.length) {
         await this.autostake(grantedAddresses)
       }
@@ -93,7 +85,7 @@ export default class NetworkRunner {
     return this.queryClient.getBalance(this.operator.botAddress, this.network.denom, { timeout })
       .then(
         (balance) => {
-          timeStamp("Bot balance is", balance.amount, balance.denom)
+          this.logger.info('Fetched bot balance', balance)
           return balance.amount
         },
         (error) => {
@@ -102,48 +94,77 @@ export default class NetworkRunner {
       )
   }
 
-  getDelegations() {
-    let timeout = this.opts.delegationsTimeout
-    let pageSize = this.opts.batchPageSize
-    return this.queryClient.getAllValidatorDelegations(this.operator.address, pageSize, { timeout }, (pages) => {
-      timeStamp("...batch", pages.length)
-      return this.throttleQuery()
-    }).catch(error => {
-      throw new Error(`Failed to get delegations: ${error.message || error}`)
-    })
-  }
-
-  async getGrantedAddresses(addresses) {
+  async getAddressesFromGrants(addresses) {
     const { botAddress, address } = this.operator
     let timeout = this.opts.delegationsTimeout
     let pageSize = this.opts.batchPageSize
     let allGrants
     try {
+      this.logger.info('Finding all grants...')
       allGrants = await this.queryClient.getGranteeGrants(botAddress, { timeout, pageSize }, (pages) => {
-        timeStamp("...batch", pages.length)
+        this.logger.info('...batch', { length: pages.length })
         return this.throttleQuery()
       })
-    } catch (e) { }
-    let grantCalls = addresses.map(item => {
+    } catch (error) {
+      if(error.response?.status === 501){
+        return false
+      }else{
+        throw new Error(`Failed to load grants: ${error.response?.status}`)
+      }
+    }
+    if (addresses){
+      this.logger.info('Checking addresses for grants...', { length: addresses.length })
+    } else {
+      addresses = allGrants.map(grant => grant.granter)
+    }
+    let addressGrants = _.uniq(addresses).map(item => {
+      return this.parseGrantResponse(allGrants, botAddress, item, address)
+    })
+    return _.compact(addressGrants.flat())
+  }
+
+  async getAddressesFromDelegators(addresses) {
+    if (!addresses) {
+      this.logger.info('Finding delegators...')
+      addresses = await this.getDelegations().then(delegations => {
+        return delegations.map(delegation => {
+          if (delegation.balance.amount === 0) return
+
+          return delegation.delegation.delegator_address
+        })
+      })
+      this.logger.info('Checking delegators for grants...', { length: addresses.length })
+    } else {
+      this.logger.info('Checking addresses for grants...', { length: addresses.length })
+    }
+    let grantCalls = _.uniq(addresses).map(item => {
       return async () => {
-        if (allGrants) return this.parseGrantResponse(allGrants, botAddress, item, address)
         try {
-          return await this.getGrants(item)
+          return await this.getGrantsIndividually(item)
         } catch (error) {
           this.setError(item, `Failed to get grants: ${error.message}`)
         }
       }
     })
     let grantedAddresses = await mapSync(grantCalls, this.opts.batchQueries, (batch, index) => {
-      if(!allGrants){
-        timeStamp('...batch', index + 1)
-        return this.throttleQuery()
-      }
+      this.logger.info('...batch', { count: index + 1 })
+      return this.throttleQuery()
     })
     return _.compact(grantedAddresses.flat())
   }
 
-  getGrants(delegatorAddress) {
+  getDelegations() {
+    let timeout = this.opts.delegationsTimeout
+    let pageSize = this.opts.batchPageSize
+    return this.queryClient.getAllValidatorDelegations(this.operator.address, pageSize, { timeout }, (pages) => {
+      this.logger.info('...batch', { count: pages.length })
+      return this.throttleQuery()
+    }).catch(error => {
+      throw new Error(`Failed to get delegations: ${error.message || error}`)
+    })
+  }
+
+  getGrantsIndividually(delegatorAddress) {
     const { botAddress, address } = this.operator
     let timeout = this.opts.queryTimeout
     return this.queryClient.getGrants(botAddress, delegatorAddress, { timeout })
@@ -162,7 +183,6 @@ export default class NetworkRunner {
     let grantValidators, maxTokens
     if (result.stakeGrant) {
       if (result.stakeGrant.authorization['@type'] === "/cosmos.authz.v1beta1.GenericAuthorization") {
-        timeStamp(delegatorAddress, "Using GenericAuthorization, allowed")
         grantValidators = [validatorAddress];
       } else {
         const { allow_list, deny_list } = result.stakeGrant.authorization
@@ -174,7 +194,7 @@ export default class NetworkRunner {
           grantValidators = []
         }
         if (!grantValidators.includes(validatorAddress)) {
-          timeStamp(delegatorAddress, "Not autostaking for this validator, skipping")
+          this.logger.info('Not autostaking for this validator, skipping', { delegatorAddress })
           return
         }
         maxTokens = result.stakeGrant.authorization.max_tokens
@@ -200,7 +220,10 @@ export default class NetworkRunner {
       return
     }
     if (withdrawAddress && withdrawAddress !== address) {
-      timeStamp(address, 'has a different withdraw address:', withdrawAddress)
+      this.logger.info('Wallet has a different withdraw address', {
+        withdrawAddress,
+        address
+      })
       return
     }
 
@@ -215,29 +238,45 @@ export default class NetworkRunner {
     let autostakeAmount = floor(totalRewards)
 
     if (smaller(bignumber(autostakeAmount), bignumber(this.operator.minimumReward))) {
-      timeStamp(address, autostakeAmount, this.network.denom, 'reward is too low, skipping')
+      this.logger.info('Reward is too low, skipping', {
+        address,
+        amount: autostakeAmount,
+        denom: this.network.denom,
+      })
       return
     }
 
     if (grant.maxTokens) {
       if (smallerEq(grant.maxTokens, 0)) {
-        timeStamp(address, grant.maxTokens, this.network.denom, 'grant balance is empty, skipping')
+        this.logger.info('Grant balance is empty, skipping', {
+          address,
+          maxTokens: grant.maxToken,
+          denom: this.network.denom,
+        })
         return
       }
       if (smaller(grant.maxTokens, autostakeAmount)) {
         autostakeAmount = grant.maxTokens
-        timeStamp(address, grant.maxTokens, this.network.denom, 'grant balance is too low, using remaining')
+        this.logger.info('Grant balance is too low, using remaining', {
+          address,
+          maxTokens: grant.maxToken,
+          denom: this.network.denom,
+        })
       }
     }
 
-    timeStamp(address, "Can autostake", autostakeAmount, this.network.denom)
+    this.logger.info('Can autostake', {
+      address,
+      amount: autostakeAmount,
+      denom: this.network.denom,
+    })
 
     return this.buildRestakeMessage(address, this.operator.address, autostakeAmount, this.network.denom)
   }
 
   async autostake(grantedAddresses) {
     let batchSize = this.opts.batchTxs
-    timeStamp('Calculating and autostaking in batches of', batchSize)
+    this.logger.info('Calculating and autostaking in batches', { batchSize })
 
     const calls = grantedAddresses.map((item, index) => {
       return async () => {
@@ -271,7 +310,7 @@ export default class NetworkRunner {
       const messages = [...this.messages]
       const promise = messages[messages.length - 1] || Promise.resolve()
       const sendTx = promise.then(() => {
-        timeStamp('Sending batch', messages.length + 1)
+        this.logger.info('Sending batch', { batch: messages.length + 1 })
         return this.sendMessages(addresses, batch)
       })
       this.messages.push(sendTx)
@@ -293,24 +332,36 @@ export default class NetworkRunner {
 
       if (this.opts.dryRun) {
         const message = `DRYRUN: Would send ${messages.length} messages using ${gas} gas`
-        timeStamp(message)
+        this.logger.info('DRYRUN: Would send messages using gas', {
+          messages: messages.length,
+          gas,
+        })
         this.balance = subtract(bignumber(this.balance), bignumber(fee.amount))
         return { message, addresses }
       } else {
         return await this.signingClient.signAndBroadcast(this.operator.botAddress, [execMsg], gas, memo).then((response) => {
           const message = `Sent ${messages.length} messages - ${response.transactionHash}`
-          timeStamp(message)
+          this.logger.info('Sent messages', {
+            transactionHash: response.transactionHash,
+            length: messages.length,
+          })
           this.balance = subtract(bignumber(this.balance), bignumber(fee.amount))
           return { message, addresses }
         }, (error) => {
           const message = `Failed ${messages.length} messages - ${error.message}`
-          timeStamp(message)
+          this.logger.info('Failed messages', {
+            error: error.message,
+            length: messages.length,
+          })
           return { message, addresses, error }
         })
       }
     } catch (error) {
       const message = `Failed ${messages.length} messages: ${error.message}`
-      timeStamp(message)
+      this.logger.info('Failed messages', {
+        error: error.message,
+        length: messages.length,
+      })
       return { message, addresses, error }
     }
   }
