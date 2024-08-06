@@ -14,4 +14,5 @@ ENV DIRECTORY_PROTOCOL=https
 ENV DIRECTORY_DOMAIN=cosmos.directory
 
 EXPOSE 3000
-CMD npm run autostake coreum coreumtestnet
+# TODO: add shido testnet, currently not in restake.app
+CMD npm run autostake coreum coreumtestnet shido
