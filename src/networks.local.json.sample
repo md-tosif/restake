@@ -5,7 +5,7 @@
     "autostake": {
       "correctSlip44": true
     },
-    "restUrl":["https://rest.cosmos.directory"],
+    "restUrl":["http://127.0.0.1:1317"],
     "gasPrice": "0.250000000000000000shido",
     "operators": [
       {
