@@ -1,8 +1,20 @@
 {
-  "akash": {
-    "prettyName": "Akash",
-    "restUrl": [
-      "https://rest.validator.com/osmosis"
+  "shido": {
+    "name": "shido",
+    "prettyName": "shido",
+    "autostake": {
+      "correctSlip44": true
+    },
+    "restUrl":["https://rest.cosmos.directory"],
+    "gasPrice": "0.250000000000000000shido",
+    "operators": [
+      {
+        "botAddress": "shido15uuwkjd028lx4r0usn2c62gm0ssw4ccdu9xw8n",
+        "address":"shidovaloper1529m29q7kfkvnps29fw60qng9kawstzam84dzu",
+        "minimumReward": 100000000000000000,
+        "moniker": "",
+        "description":""
+      }
     ]
   }
 }
