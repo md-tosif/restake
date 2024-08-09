@@ -329,9 +329,7 @@
     "gasPrice": "0.0625ucore"
   },
   {
-    "name": "shido",
-    "ownerAddress": "corevaloper1py9v5f7e4aaka55lwtthk30scxhnqfa6agwxt8",
-    "gasPrice": "0.250000000000000000shido"
+    "name": "shido"
   },
   {
     "name": "shidotestnet",
