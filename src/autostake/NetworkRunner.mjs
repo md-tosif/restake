@@ -18,7 +18,7 @@ export default class NetworkRunner {
       delegationsTimeout: 20000,
       queryTimeout: network.data.autostake?.delegatorTimeout || 5000, // deprecate delegatorTimeout
       queryThrottle: 100,
-      gasModifier: 1.1,
+      gasModifier: 1.3,
     }, network.data.autostake, opts)
     this.batch = {}
     this.messages = []

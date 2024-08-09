@@ -329,7 +329,8 @@
     "gasPrice": "0.0625ucore"
   },
   {
-    "name": "shido"
+    "name": "shido",
+    "gasPrice": "0.250000000000000000shido"
   },
   {
     "name": "shidotestnet",
